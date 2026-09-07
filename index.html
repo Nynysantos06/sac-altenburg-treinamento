@@ -940,6 +940,50 @@ const FIREBASE_CONFIG = {
 const FIREBASE_DOC_PATH = { collection: 'treinamento-sac', doc: 'estado-geral' };
 
 let fbApp=null, fbDb=null, fbDocRef=null, fbReady=false;
+
+/* O Firestore não aceita "lista dentro de lista" (ex.: linhas do planner
+   guardadas como [ [a,b,c,d], [a,b,c,d] ] ). Por isso, só na hora de
+   salvar/ler do Firestore, convertemos essas linhas para objetos
+   ({t0,t1,t2,t3}) e depois de volta para listas, sem mexer no resto do
+   código, que continua usando listas normalmente. */
+function rowsToSafe(rows){ return (rows||[]).map(r=> Array.isArray(r) ? {t0:r[0],t1:r[1],t2:r[2],t3:r[3]} : r); }
+function rowsFromSafe(rows){ return (rows||[]).map(r=> Array.isArray(r) ? r : [r.t0,r.t1,r.t2,r.t3]); }
+function makeFirestoreSafe(state){
+  const clone = JSON.parse(JSON.stringify(state));
+  if(clone.planners){
+    Object.keys(clone.planners).forEach(modId=>{
+      clone.planners[modId].morning = rowsToSafe(clone.planners[modId].morning);
+      clone.planners[modId].afternoon = rowsToSafe(clone.planners[modId].afternoon);
+    });
+  }
+  if(clone.customModules){
+    clone.customModules.forEach(cm=>{
+      if(cm.plannerRows){
+        cm.plannerRows.morning = rowsToSafe(cm.plannerRows.morning);
+        cm.plannerRows.afternoon = rowsToSafe(cm.plannerRows.afternoon);
+      }
+    });
+  }
+  return clone;
+}
+function restoreFromFirestore(data){
+  if(!data) return data;
+  if(data.planners){
+    Object.keys(data.planners).forEach(modId=>{
+      data.planners[modId].morning = rowsFromSafe(data.planners[modId].morning);
+      data.planners[modId].afternoon = rowsFromSafe(data.planners[modId].afternoon);
+    });
+  }
+  if(data.customModules){
+    data.customModules.forEach(cm=>{
+      if(cm.plannerRows){
+        cm.plannerRows.morning = rowsFromSafe(cm.plannerRows.morning);
+        cm.plannerRows.afternoon = rowsFromSafe(cm.plannerRows.afternoon);
+      }
+    });
+  }
+  return data;
+}
 let suppressNextSnapshot = false;
 
 async function initFirebase(){
@@ -957,7 +1001,7 @@ async function initFirebase(){
     onSnapshot(fbDocRef, (snap)=>{
       if(suppressNextSnapshot){ suppressNextSnapshot=false; return; }
       if(snap.exists()){
-        STATE = Object.assign({}, STATE, snap.data());
+        STATE = Object.assign({}, STATE, restoreFromFirestore(snap.data()));
         ensurePlanners();
         renderAll();
         showToast('🔄 Atualizado por outra pessoa');
@@ -1481,7 +1525,7 @@ async function saveState(){
   if(fbReady){
     try{
       suppressNextSnapshot = true;
-      await window.__fb.setDoc(fbDocRef, STATE, { merge:false });
+      await window.__fb.setDoc(fbDocRef, makeFirestoreSafe(STATE), { merge:false });
       showToast('Salvo na nuvem ✓');
     }catch(e){
       console.error('Erro ao salvar na nuvem', e);
@@ -1498,7 +1542,7 @@ async function loadState(){
   if(fbReady){
     try{
       const snap = await window.__fb.getDoc(fbDocRef);
-      if(snap.exists()){ STATE = Object.assign({}, STATE, snap.data()); }
+      if(snap.exists()){ STATE = Object.assign({}, STATE, restoreFromFirestore(snap.data())); }
     }catch(e){ console.error('Erro ao carregar da nuvem', e); }
   }
   if(!fbReady || Object.keys(STATE.planners||{}).length===0){
