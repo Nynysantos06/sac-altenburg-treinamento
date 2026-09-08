@@ -1,0 +1,14 @@
+name: Teste atualização PDF
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Testar workflow
+        run: echo "Workflow funcionando"
